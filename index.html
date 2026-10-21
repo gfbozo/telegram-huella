@@ -47,7 +47,7 @@ function registrar() {
   const token = randomToken();
   bm.updateBiometricToken(token, ok => {
     if (ok) tg.sendData(JSON.stringify({ t: "reg", token, dev: bm.deviceId }));
-    else show("No se pudo guardar la huella.", "Reintentar", registrar);
+    else show("No se pudo guardar la huella.", "Reintentar", paso);
   });
 }
 
@@ -58,8 +58,28 @@ function autenticar() {
   }
   bm.authenticate({ reason: "Autorizar a Claude en tu PC" }, (ok, token) => {
     if (ok && token) tg.sendData(JSON.stringify({ t: "auth", token, dev: bm.deviceId }));
-    else show("Huella no confirmada.", "Reintentar", autenticar);
+    else show("Huella no confirmada.", "Reintentar", paso);
   });
+}
+
+// Telegram para Android rechaza en silencio los pedidos de permiso que no vienen de un toque del
+// usuario, así que todo arranca desde el botón.
+function paso() {
+  try {
+    const seguir = modo === "registrar" ? registrar : autenticar;
+    if (bm.isAccessGranted) return seguir();
+    if (!bm.isAccessRequested) {
+      bm.requestAccess({ reason: "Para autorizar a Claude con tu huella" }, ok => {
+        if (ok) show("Permiso concedido.", modo === "registrar" ? "Registrar huella" : "Poner huella", paso);
+        else show("Telegram no recibió permiso para usar la huella.", "Abrir ajustes", paso);
+      });
+      return;
+    }
+    bm.openSettings();
+    show("Activa la huella para este bot en los ajustes y vuelve a abrir el botón.");
+  } catch (e) {
+    show("Error: " + e.message, "Reintentar", paso);
+  }
 }
 
 function iniciar() {
@@ -67,16 +87,10 @@ function iniciar() {
     show("Este teléfono no ofrece huella a Telegram. Usa el PIN.");
     return;
   }
-  const seguir = modo === "registrar" ? registrar : autenticar;
-  if (bm.isAccessGranted) return seguir();
-  if (!bm.isAccessRequested) {
-    bm.requestAccess({ reason: "Para autorizar a Claude con tu huella" }, ok => {
-      if (ok) seguir();
-      else show("Sin permiso para usar la huella.", "Abrir ajustes", () => bm.openSettings());
-    });
-    return;
-  }
-  show("Telegram no tiene permiso para usar la huella.", "Abrir ajustes", () => bm.openSettings());
+  const label = modo === "registrar" ? "Registrar huella" : "Poner huella";
+  if (bm.isAccessGranted) show("Toca para continuar.", label, paso);
+  else if (!bm.isAccessRequested) show("Telegram te pedirá permiso para usar la huella.", "Dar permiso", paso);
+  else show("Telegram no tiene permiso para usar la huella.", "Abrir ajustes", paso);
 }
 
 tg.ready();
