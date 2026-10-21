@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Huella</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; text-align: center;
+         background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); }
+  main { padding: 48px 16px; }
+  .icono { font-size: 64px; }
+  p { font-size: 17px; line-height: 1.4; }
+  button { margin-top: 16px; padding: 12px 24px; font-size: 17px; border: 0; border-radius: 10px;
+           background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
+  button[hidden] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <div class="icono">👆</div>
+  <p id="msg">Preparando…</p>
+  <button id="btn" hidden>Reintentar</button>
+</main>
+<script>
+// Mini App de Telegram: pide la huella del teléfono y le entrega al bot el token guardado en el
+// almacén seguro del dispositivo (solo se puede leer tras autenticarse). Sin secretos en esta página.
+const tg = window.Telegram.WebApp;
+const bm = tg.BiometricManager;
+const modo = new URLSearchParams(location.search).get("modo") || "auth";
+const msg = document.getElementById("msg");
+const btn = document.getElementById("btn");
+
+function show(text, label, action) {
+  msg.textContent = text;
+  btn.hidden = !label;
+  if (label) { btn.textContent = label; btn.onclick = action; }
+}
+
+function randomToken() {
+  const b = new Uint8Array(32);
+  crypto.getRandomValues(b);
+  return Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
+}
+
+function registrar() {
+  const token = randomToken();
+  bm.updateBiometricToken(token, ok => {
+    if (ok) tg.sendData(JSON.stringify({ t: "reg", token, dev: bm.deviceId }));
+    else show("No se pudo guardar la huella.", "Reintentar", registrar);
+  });
+}
+
+function autenticar() {
+  if (!bm.isBiometricTokenSaved) {
+    show("Esta huella aún no está registrada. Envía /huella al bot.");
+    return;
+  }
+  bm.authenticate({ reason: "Autorizar a Claude en tu PC" }, (ok, token) => {
+    if (ok && token) tg.sendData(JSON.stringify({ t: "auth", token, dev: bm.deviceId }));
+    else show("Huella no confirmada.", "Reintentar", autenticar);
+  });
+}
+
+function iniciar() {
+  if (!bm.isBiometricAvailable) {
+    show("Este teléfono no ofrece huella a Telegram. Usa el PIN.");
+    return;
+  }
+  const seguir = modo === "registrar" ? registrar : autenticar;
+  if (bm.isAccessGranted) return seguir();
+  if (!bm.isAccessRequested) {
+    bm.requestAccess({ reason: "Para autorizar a Claude con tu huella" }, ok => {
+      if (ok) seguir();
+      else show("Sin permiso para usar la huella.", "Abrir ajustes", () => bm.openSettings());
+    });
+    return;
+  }
+  show("Telegram no tiene permiso para usar la huella.", "Abrir ajustes", () => bm.openSettings());
+}
+
+tg.ready();
+if (!tg.isVersionAtLeast("7.2")) {
+  show("Actualiza Telegram para usar la huella.");
+} else {
+  bm.init(iniciar);
+}
+</script>
+</body>
+</html>
